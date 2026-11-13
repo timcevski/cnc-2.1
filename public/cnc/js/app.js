@@ -898,7 +898,9 @@ document.addEventListener('DOMContentLoaded', function() {
     };
   }
 
-  document.getElementById('btnExportGcode').onclick = () => {
+  let currentGeneratedGcode = '';
+
+  function openGcodePreview() {
     if (CNCApp.Machine && typeof CNCApp.Machine.checkActivePointsBounds === 'function') {
       var violations = CNCApp.Machine.checkActivePointsBounds();
       if (violations.length > 0) {
@@ -907,14 +909,103 @@ document.addEventListener('DOMContentLoaded', function() {
           '⚠️ ПРЕДУПРЕДУВАЊЕ (Работни лимити):\n\n' +
           violations.length + ' активна/и точка/и со пресметан офсет ги надминуваат границите на машината!\n' +
           'Пример: Точка #' + firstV.rowNum + ' (' + firstV.dispenserName + ') -> X=' + firstV.machX.toFixed(2) + ', Y=' + firstV.machY.toFixed(2) + '\n' +
-          firstV.message + '\n\nДали сепак сакате да го извезете G-кодот (.tap)?'
+          firstV.message + '\n\nДали сепак сакате да го прегледате G-кодот (.tap)?'
         );
         if (!proceedExport) return;
       }
     }
-    const gcode = CNCApp.GCode.generate();
-    saveWithPicker(gcode, 'dispenser_program.tap', 'text/plain', { updateProjectName: false });
-  };
+
+    currentGeneratedGcode = CNCApp.GCode.generate();
+    var linesArr = currentGeneratedGcode.split('\n');
+    var linesCount = linesArr.length;
+
+    var previewModal = document.getElementById('gcodePreviewModal');
+    var previewText = document.getElementById('gcodePreviewText');
+    var statLines = document.getElementById('gcodeStatLines');
+    var statTime = document.getElementById('gcodeStatTime');
+    var statDist = document.getElementById('gcodeStatDist');
+    var statMode = document.getElementById('gcodeStatMode');
+    var subTitle = document.getElementById('gcodePreviewSubTitle');
+
+    if (previewText) previewText.value = currentGeneratedGcode;
+    if (statLines) statLines.innerText = linesCount;
+
+    var timeText = document.getElementById('cycleTimeDisplay') ? document.getElementById('cycleTimeDisplay').innerText.replace('Време: ', '') : '~0с';
+    var distText = document.getElementById('cycleSubDisplay') ? document.getElementById('cycleSubDisplay').innerText.replace('Патека: ', '') : '0m';
+    if (statTime) statTime.innerText = timeText;
+    if (statDist) statDist.innerText = distText;
+
+    var m = CNCApp.State.machine || {};
+    var isM11 = (m.valveOpenCmd && m.valveOpenCmd.toUpperCase().indexOf('M11') !== -1);
+    if (statMode) {
+      if (isM11) {
+        statMode.innerText = 'Режим: M10/M11 (+ 0.001mm микрочекор без макроа)';
+        statMode.style.background = '#dbeafe';
+        statMode.style.color = '#1e40af';
+        statMode.style.borderColor = '#93c5fd';
+      } else {
+        statMode.innerText = 'Режим: Со макроа (' + (m.valveOpenCmd || 'M103') + '/' + (m.valveCloseCmd || 'M203') + ')';
+        statMode.style.background = '#fef3c7';
+        statMode.style.color = '#92400e';
+        statMode.style.borderColor = '#f59e0b';
+      }
+    }
+
+    var projName = CNCApp.State.projectName || 'Нов проект.csv';
+    var tapName = projName.replace(/\.csv$/i, '') + '.tap';
+    if (subTitle) subTitle.innerText = 'Генериран код за: ' + tapName;
+
+    if (previewModal) previewModal.style.display = 'flex';
+  }
+
+  document.getElementById('btnExportGcode').onclick = openGcodePreview;
+
+  const btnCloseGcodePreview = document.getElementById('btnCloseGcodePreview');
+  const btnCancelGcodePreview = document.getElementById('btnCancelGcodePreview');
+  const gcodePreviewModal = document.getElementById('gcodePreviewModal');
+  if (btnCloseGcodePreview) btnCloseGcodePreview.onclick = () => { if (gcodePreviewModal) gcodePreviewModal.style.display = 'none'; };
+  if (btnCancelGcodePreview) btnCancelGcodePreview.onclick = () => { if (gcodePreviewModal) gcodePreviewModal.style.display = 'none'; };
+
+  const btnCopyGcodePreview = document.getElementById('btnCopyGcodePreview');
+  if (btnCopyGcodePreview) {
+    btnCopyGcodePreview.onclick = () => {
+      if (!currentGeneratedGcode) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(currentGeneratedGcode).then(() => {
+          var origText = btnCopyGcodePreview.innerText;
+          btnCopyGcodePreview.innerText = '✔ Ископирано!';
+          setTimeout(() => { btnCopyGcodePreview.innerText = origText; }, 1500);
+        }).catch(() => {
+          var t = document.getElementById('gcodePreviewText');
+          if (t) { t.select(); document.execCommand('copy'); }
+        });
+      } else {
+        var t = document.getElementById('gcodePreviewText');
+        if (t) { t.select(); document.execCommand('copy'); }
+      }
+    };
+  }
+
+  const btnSaveGcodeFromPreview = document.getElementById('btnSaveGcodeFromPreview');
+  if (btnSaveGcodeFromPreview) {
+    btnSaveGcodeFromPreview.onclick = () => {
+      if (!currentGeneratedGcode) currentGeneratedGcode = CNCApp.GCode.generate();
+      var projName = CNCApp.State.projectName || 'dispenser_program.csv';
+      var defaultTapName = projName.replace(/\.csv$/i, '') + '.tap';
+      if (!defaultTapName.toLowerCase().endsWith('.tap')) defaultTapName += '.tap';
+      saveWithPicker(currentGeneratedGcode, defaultTapName, 'text/plain', { updateProjectName: false });
+    };
+  }
+
+  const btnRunFromGcodePreview = document.getElementById('btnRunFromGcodePreview');
+  if (btnRunFromGcodePreview) {
+    btnRunFromGcodePreview.onclick = () => {
+      if (gcodePreviewModal) gcodePreviewModal.style.display = 'none';
+      if (CNCApp.Machine && typeof CNCApp.Machine.startActiveTabJob === 'function') {
+        CNCApp.Machine.startActiveTabJob();
+      }
+    };
+  }
 
   document.getElementById('btnAddDispenser').onclick = () => {
     const list = CNCApp.State.machine.dispensers;
@@ -965,6 +1056,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     document.getElementById('modalHeaderCode').value = CNCApp.State.header;
     document.getElementById('modalFooterCode').value = CNCApp.State.footer;
+    document.getElementById('modalValveOpenCmd').value = CNCApp.State.machine.valveOpenCmd || 'M11 P1';
+    document.getElementById('modalValveCloseCmd').value = CNCApp.State.machine.valveCloseCmd || 'M10 P1';
+    document.getElementById('modalHomeCmd').value = CNCApp.State.machine.homeCommand || 'G28.1 X2 Y2';
+    document.getElementById('modalParkCmd').value = CNCApp.State.machine.parkCommand || 'G1 X1 Y1 F2000';
     document.getElementById('modalTimeUnit').value = CNCApp.State.machine.timeUnit || 'ms';
     document.getElementById('modalDecimalSeparator').value = CNCApp.State.machine.decimalSeparator || '.';
     document.getElementById('modalMLatency').value = CNCApp.State.machine.mCommandLatency || 120;
@@ -981,6 +1076,38 @@ document.addEventListener('DOMContentLoaded', function() {
     modal.style.display = 'flex';
   };
 
+  const btnPresetM10M11 = document.getElementById('btnPresetM10M11');
+  if (btnPresetM10M11) {
+    btnPresetM10M11.onclick = () => {
+      document.getElementById('modalValveOpenCmd').value = 'M11 P1';
+      document.getElementById('modalValveCloseCmd').value = 'M10 P1';
+      const rows = document.querySelectorAll('#dispensersTableBody tr');
+      rows.forEach((r, i) => {
+        const inputs = r.querySelectorAll('input');
+        if (inputs.length >= 4) {
+          inputs[2].value = 'M11 P' + (i + 2);
+          inputs[3].value = 'M10 P' + (i + 2);
+        }
+      });
+    };
+  }
+
+  const btnPresetMacros = document.getElementById('btnPresetMacros');
+  if (btnPresetMacros) {
+    btnPresetMacros.onclick = () => {
+      document.getElementById('modalValveOpenCmd').value = 'M103';
+      document.getElementById('modalValveCloseCmd').value = 'M203';
+      const rows = document.querySelectorAll('#dispensersTableBody tr');
+      rows.forEach((r, i) => {
+        const inputs = r.querySelectorAll('input');
+        if (inputs.length >= 4) {
+          inputs[2].value = 'M' + (104 + i);
+          inputs[3].value = 'M' + (204 + i);
+        }
+      });
+    };
+  }
+
   const btnResetCal = document.getElementById('btnResetCalibratedDispensers');
   if (btnResetCal) {
     btnResetCal.onclick = () => {
@@ -991,6 +1118,10 @@ document.addEventListener('DOMContentLoaded', function() {
         { id: 4, name: "Боја 4", color: "#d97706", lowerCmd: "M107", raiseCmd: "M207", offsetX: 119.70, offsetY: 34.45 },
         { id: 5, name: "Боја 5", color: "#7c3aed", lowerCmd: "M108", raiseCmd: "M208", offsetX: 159.70, offsetY: 34.45 }
       ];
+      CNCApp.State.machine.valveOpenCmd = "M11 P1";
+      CNCApp.State.machine.valveCloseCmd = "M10 P1";
+      CNCApp.State.machine.homeCommand = "G28.1 X2 Y2";
+      CNCApp.State.machine.parkCommand = "G1 X1 Y1 F2000";
       CNCApp.State.machine.minX = -5;
       CNCApp.State.machine.maxX = 350;
       CNCApp.State.machine.minY = -5;
@@ -998,6 +1129,10 @@ document.addEventListener('DOMContentLoaded', function() {
       CNCApp.State.machine.moveClickSpeed = 3000;
       CNCApp.State.footer = "G28.1 X2 Y2\r\nG1 X1 Y1 F2000\r\nM5\r\nM30";
       document.getElementById('modalFooterCode').value = CNCApp.State.footer;
+      document.getElementById('modalValveOpenCmd').value = CNCApp.State.machine.valveOpenCmd;
+      document.getElementById('modalValveCloseCmd').value = CNCApp.State.machine.valveCloseCmd;
+      document.getElementById('modalHomeCmd').value = CNCApp.State.machine.homeCommand;
+      document.getElementById('modalParkCmd').value = CNCApp.State.machine.parkCommand;
       document.getElementById('modalMinX').value = CNCApp.State.machine.minX;
       document.getElementById('modalMaxX').value = CNCApp.State.machine.maxX;
       document.getElementById('modalMinY').value = CNCApp.State.machine.minY;
@@ -1009,6 +1144,9 @@ document.addEventListener('DOMContentLoaded', function() {
       CNCApp.Storage.saveAutoSave();
       if (CNCApp.Machine && CNCApp.Machine.activeDriverId === 'mach3' && CNCApp.Mach3BridgeDriver && CNCApp.Mach3BridgeDriver.connected) {
         CNCApp.Mach3BridgeDriver.syncConfig();
+      }
+      if (CNCApp.Machine && typeof CNCApp.Machine.refreshUI === 'function') {
+        CNCApp.Machine.refreshUI();
       }
     };
   }
@@ -1037,6 +1175,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     CNCApp.State.header = document.getElementById('modalHeaderCode').value;
     CNCApp.State.footer = document.getElementById('modalFooterCode').value;
+    CNCApp.State.machine.valveOpenCmd = document.getElementById('modalValveOpenCmd').value.trim() || 'M11 P1';
+    CNCApp.State.machine.valveCloseCmd = document.getElementById('modalValveCloseCmd').value.trim() || 'M10 P1';
+    CNCApp.State.machine.homeCommand = document.getElementById('modalHomeCmd').value.trim() || 'G28.1 X2 Y2';
+    CNCApp.State.machine.parkCommand = document.getElementById('modalParkCmd').value.trim() || 'G1 X1 Y1 F2000';
     CNCApp.State.machine.timeUnit = document.getElementById('modalTimeUnit').value;
     CNCApp.State.machine.decimalSeparator = document.getElementById('modalDecimalSeparator').value;
     CNCApp.State.machine.mCommandLatency = parseInt(document.getElementById('modalMLatency').value) || 120;
@@ -1069,6 +1211,9 @@ document.addEventListener('DOMContentLoaded', function() {
     CNCApp.Storage.saveAutoSave();
     if (CNCApp.Machine && CNCApp.Machine.activeDriverId === 'mach3' && CNCApp.Mach3BridgeDriver && CNCApp.Mach3BridgeDriver.connected) {
       CNCApp.Mach3BridgeDriver.syncConfig();
+    }
+    if (CNCApp.Machine && typeof CNCApp.Machine.refreshUI === 'function') {
+      CNCApp.Machine.refreshUI();
     }
     modal.style.display = 'none';
   };

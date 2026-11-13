@@ -91,7 +91,13 @@ CNCApp.GCode = {
           lines.push(`G1 X${targetMx} Y${targetMy} F${targetSpd} ;ID:${startFromIdx + 1} G1:${targetPt.group1 || ''} G2:${targetPt.group2 || ''}`);
 
           // Пристигнување на точката N: отворање вентил
-          lines.push(m.valveOpenCmd + ` ;Отворање вентил точно над точка #${startFromIdx + 1}`);
+          const hasTargetDwell = (!isNaN(parseFloat(targetPt.time)) && parseFloat(targetPt.time) > 0);
+          if (hasTargetDwell) {
+            const microTargetMx = this.formatCoord(targetPt.x + (targetDisp.offsetX || 0) + 0.001);
+            lines.push(m.valveOpenCmd + ` G1 X${microTargetMx} F200 ;Отворање вентил со микро-чекор 0.001mm над точка #${startFromIdx + 1}`);
+          } else {
+            lines.push(m.valveOpenCmd + ` ;Отворање вентил точно над точка #${startFromIdx + 1}`);
+          }
 
           // Извршување на останатите операции на точката N доколку се дефинирани
           const dwell = parseFloat(targetPt.time);
@@ -105,7 +111,11 @@ CNCApp.GCode = {
             }
           }
           if (targetPt.valveStop) {
-            lines.push(m.valveCloseCmd);
+            if (hasTargetDwell) {
+              lines.push(m.valveCloseCmd + ` G1 X${targetMx} F200 ;Затворање вентил и враќање на точна позиција`);
+            } else {
+              lines.push(m.valveCloseCmd);
+            }
           }
           if (targetPt.raise) {
             lines.push(targetDisp.raiseCmd);
@@ -123,8 +133,14 @@ CNCApp.GCode = {
             const lDelayStr = isSec && m.decimalSeparator === ',' ? String(lDelay).replace('.', ',') : String(lDelay);
             lines.push(`G4 P${lDelayStr}`);
           }
+          const hasCaseBDwell = (!isNaN(parseFloat(targetPt.time)) && parseFloat(targetPt.time) > 0);
           if (targetPt.valveStart) {
-            lines.push(m.valveOpenCmd);
+            if (hasCaseBDwell) {
+              const microTargetMx = this.formatCoord(targetPt.x + (targetDisp.offsetX || 0) + 0.001);
+              lines.push(m.valveOpenCmd + ` G1 X${microTargetMx} F200 ;Отворање вентил со микро-чекор 0.001mm`);
+            } else {
+              lines.push(m.valveOpenCmd);
+            }
           }
           const dwell = parseFloat(targetPt.time);
           if (!isNaN(dwell) && dwell > 0) {
@@ -137,7 +153,11 @@ CNCApp.GCode = {
             }
           }
           if (targetPt.valveStop) {
-            lines.push(m.valveCloseCmd);
+            if (hasCaseBDwell) {
+              lines.push(m.valveCloseCmd + ` G1 X${targetMx} F200 ;Затворање вентил и враќање на точна позиција`);
+            } else {
+              lines.push(m.valveCloseCmd);
+            }
           }
           if (targetPt.raise) {
             lines.push(targetDisp.raiseCmd);
@@ -180,8 +200,15 @@ CNCApp.GCode = {
         lines.push(`G4 P${lDelayStr}`);
       }
 
+      const hasPointDwell = (!isNaN(parseFloat(p.time)) && parseFloat(p.time) > 0);
+
       if (p.valveStart) {
-        lines.push(m.valveOpenCmd);
+        if (hasPointDwell) {
+          const microMx = this.formatCoord(p.x + (disp.offsetX || 0) + 0.001);
+          lines.push(m.valveOpenCmd + ` G1 X${microMx} F200 ;Отворање вентил со микро-чекор 0.001mm`);
+        } else {
+          lines.push(m.valveOpenCmd);
+        }
       }
 
       const dwell = parseFloat(p.time);
@@ -196,7 +223,11 @@ CNCApp.GCode = {
       }
 
       if (p.valveStop) {
-        lines.push(m.valveCloseCmd);
+        if (hasPointDwell) {
+          lines.push(m.valveCloseCmd + ` G1 X${mx} F200 ;Затворање вентил и враќање на точна позиција`);
+        } else {
+          lines.push(m.valveCloseCmd);
+        }
       }
 
       if (p.raise) {

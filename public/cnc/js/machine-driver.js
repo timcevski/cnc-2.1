@@ -63,6 +63,8 @@ CNCApp.Machine = {
   _pollTimer: null,
   _isDraggingSplitter: false,
   _jogInFlight: false,
+  _mdiHistory: [],
+  _mdiHistoryIdx: -1,
 
   init: function() {
     if (CNCApp.SimulatorDriver) {
@@ -783,7 +785,7 @@ CNCApp.Machine = {
 
   toggleDispenser: function(dispId) {
     if (!this.isConnected() || this.status !== 'IDLE') return;
-    var list = CNCApp.State.machine.dispensers || [];
+    var list = (CNCApp.State.machine && CNCApp.State.machine.dispensers) || [];
     var disp = null;
     for (var i = 0; i < list.length; i++) {
       if (list[i].id === dispId) {
@@ -794,11 +796,21 @@ CNCApp.Machine = {
     if (!disp) return;
 
     var lowered = this.isDispenserLowered(dispId);
-    var cmd = lowered ? (disp.raiseCmd || ('M' + (203 + dispId))) : (disp.lowerCmd || ('M' + (103 + dispId)));
+    var defaultLower = 'M' + (103 + dispId);
+    var defaultRaise = 'M' + (203 + dispId);
+    var cmd = lowered ? (disp.raiseCmd || defaultRaise) : (disp.lowerCmd || defaultLower);
+
+    var isM11orM10 = (cmd.toUpperCase().indexOf('M11') !== -1 || cmd.toUpperCase().indexOf('M10') !== -1);
+    var fullCmd = cmd;
+    if (isM11orM10) {
+      var delta = lowered ? '-0.001' : '0.001';
+      fullCmd = cmd + '\nG91\nG1 X' + delta + ' F200\nG90';
+    }
+
     var drv = CNCApp.MachineDriver.getActive();
     if (!drv) return;
     var self = this;
-    drv.sendCommand(cmd, function(err, snap) {
+    drv.sendCommand(fullCmd, function(err, snap) {
       if (err) {
         self.lastError = err.message;
         self.refreshUI();
@@ -836,12 +848,23 @@ CNCApp.Machine = {
 
   toggleValve: function() {
     if (!this.isConnected() || this.status !== 'IDLE') return;
-    var m = CNCApp.State.machine;
-    var cmd = (this.coords && this.coords.valveOpen) ? (m.valveCloseCmd || 'M203') : (m.valveOpenCmd || 'M103');
+    var m = CNCApp.State.machine || {};
+    var isOpen = !!(this.coords && this.coords.valveOpen);
+    var openCmd = m.valveOpenCmd || 'M11 P1';
+    var closeCmd = m.valveCloseCmd || 'M10 P1';
+    var cmd = isOpen ? closeCmd : openCmd;
+
+    var isM11orM10 = (cmd.toUpperCase().indexOf('M11') !== -1 || cmd.toUpperCase().indexOf('M10') !== -1);
+    var fullCmd = cmd;
+    if (isM11orM10) {
+      var delta = isOpen ? '-0.001' : '0.001';
+      fullCmd = cmd + '\nG91\nG1 X' + delta + ' F200\nG90';
+    }
+
     var drv = CNCApp.MachineDriver.getActive();
     if (!drv) return;
     var self = this;
-    drv.sendCommand(cmd, function(err, snap) {
+    drv.sendCommand(fullCmd, function(err, snap) {
       if (err) {
         self.lastError = err.message;
         self.refreshUI();
@@ -853,15 +876,75 @@ CNCApp.Machine = {
 
   pulseValve100ms: function() {
     if (!this.isConnected() || this.status !== 'IDLE') return;
+    var m = CNCApp.State.machine || {};
+    var openCmd = m.valveOpenCmd || 'M11 P1';
+    var closeCmd = m.valveCloseCmd || 'M10 P1';
+    var isM11orM10 = (openCmd.toUpperCase().indexOf('M11') !== -1);
+
     var drv = CNCApp.MachineDriver.getActive();
     if (!drv) return;
     var self = this;
-    drv.sendCommand('PULSE:100', function(err, snap) {
+
+    var pulseCmd = 'PULSE:100';
+    if (isM11orM10 && this.activeDriverId === 'mach3') {
+      pulseCmd = openCmd + '\nG91\nG1 X0.001 F200\nG90\nG4 P100\n' + closeCmd + '\nG91\nG1 X-0.001 F200\nG90';
+    }
+
+    drv.sendCommand(pulseCmd, function(err, snap) {
       if (err) {
         self.lastError = err.message;
         self.refreshUI();
         return;
       }
+      self._applySnapshot(snap);
+    });
+  },
+
+  sendMdiCommand: function(cmdStr) {
+    if (!this.isConnected()) {
+      alert('⚠️ Прво поврзете се со Симулатор или Mach3 Bridge пред да праќате MDI команди.');
+      return;
+    }
+    if (this.status === 'RUNNING' || this.status === 'HOLD') {
+      alert('⛔ Не може да се извршува рачна MDI команда додека машината активно извршува програма.');
+      return;
+    }
+
+    var cmd = (cmdStr || '').trim();
+    if (!cmd) return;
+
+    if (this._mdiHistory.length === 0 || this._mdiHistory[this._mdiHistory.length - 1] !== cmd) {
+      this._mdiHistory.push(cmd);
+      if (this._mdiHistory.length > 50) this._mdiHistory.shift();
+    }
+    this._mdiHistoryIdx = this._mdiHistory.length;
+
+    var statusEl = document.getElementById('machineMdiStatus');
+    if (statusEl) {
+      statusEl.innerText = 'Праќање: ' + cmd + '...';
+      statusEl.style.color = '#2563eb';
+    }
+
+    var drv = CNCApp.MachineDriver.getActive();
+    if (!drv) return;
+    var self = this;
+
+    drv.runQuickCommand(cmd, function(err, snap) {
+      if (err) {
+        self.lastError = err.message;
+        if (statusEl) {
+          statusEl.innerText = '❌ Грешка: ' + err.message;
+          statusEl.style.color = '#dc2626';
+        }
+        self.refreshUI();
+        return;
+      }
+      if (statusEl) {
+        statusEl.innerText = '✔ Извршено: ' + cmd;
+        statusEl.style.color = '#16a34a';
+      }
+      var inp = document.getElementById('machineMdiInput');
+      if (inp) inp.value = '';
       self._applySnapshot(snap);
     });
   },
@@ -1077,8 +1160,51 @@ CNCApp.Machine = {
 
     var btnCmdHome = document.getElementById('btnCmdHomeRef');
     var btnCmdPark = document.getElementById('btnCmdParkPos');
-    if (btnCmdHome) btnCmdHome.onclick = function() { self.runQuickCommand('G28.1 X2 Y2'); };
-    if (btnCmdPark) btnCmdPark.onclick = function() { self.runQuickCommand('G1 X1 Y1 F2000'); };
+    if (btnCmdHome) {
+      btnCmdHome.onclick = function() {
+        var cmd = (CNCApp.State.machine && CNCApp.State.machine.homeCommand) || 'G28.1 X2 Y2';
+        self.runQuickCommand(cmd);
+      };
+    }
+    if (btnCmdPark) {
+      btnCmdPark.onclick = function() {
+        var cmd = (CNCApp.State.machine && CNCApp.State.machine.parkCommand) || 'G1 X1 Y1 F2000';
+        self.runQuickCommand(cmd);
+      };
+    }
+
+    var mdiInp = document.getElementById('machineMdiInput');
+    var mdiBtn = document.getElementById('btnMachineMdiSend');
+    if (mdiBtn && mdiInp) {
+      mdiBtn.onclick = function() {
+        self.sendMdiCommand(mdiInp.value);
+      };
+      mdiInp.onkeydown = function(e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          self.sendMdiCommand(mdiInp.value);
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          if (self._mdiHistory.length > 0) {
+            if (self._mdiHistoryIdx > 0) {
+              self._mdiHistoryIdx--;
+            }
+            mdiInp.value = self._mdiHistory[self._mdiHistoryIdx] || '';
+          }
+        } else if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          if (self._mdiHistory.length > 0) {
+            if (self._mdiHistoryIdx < self._mdiHistory.length - 1) {
+              self._mdiHistoryIdx++;
+              mdiInp.value = self._mdiHistory[self._mdiHistoryIdx] || '';
+            } else {
+              self._mdiHistoryIdx = self._mdiHistory.length;
+              mdiInp.value = '';
+            }
+          }
+        }
+      };
+    }
 
     var btnJumpTab = document.getElementById('btnJumpToRunningTab');
     if (btnJumpTab) {
@@ -1336,6 +1462,22 @@ CNCApp.Machine = {
     this._setDisabled('btnRaiseAllDispensers', manualLocked);
     this._setDisabled('btnCmdHomeRef', manualLocked);
     this._setDisabled('btnCmdParkPos', manualLocked);
+    this._setDisabled('btnMachineMdiSend', !connected || busy);
+    this._setDisabled('machineMdiInput', !connected || busy);
+
+    // Ажурирај ги натписите на копчињата за Хомирање и Паркирање според поставките
+    var homeCmd = (CNCApp.State.machine && CNCApp.State.machine.homeCommand) || 'G28.1 X2 Y2';
+    var parkCmd = (CNCApp.State.machine && CNCApp.State.machine.parkCommand) || 'G1 X1 Y1 F2000';
+    var btnCmdHome = document.getElementById('btnCmdHomeRef');
+    var btnCmdPark = document.getElementById('btnCmdParkPos');
+    if (btnCmdHome) {
+      btnCmdHome.innerText = '🏠 ' + homeCmd;
+      btnCmdHome.title = 'Хомирање (' + homeCmd + '): прво мора сите диспензери да се подигнати';
+    }
+    if (btnCmdPark) {
+      btnCmdPark.innerText = '🎯 ' + parkCmd;
+      btnCmdPark.title = 'Паркирање (' + parkCmd + '): прво мора сите диспензери да се подигнати';
+    }
 
     // Освежи ги динамичките копчиња за диспензери и статус-беџот
     this.renderDispenserButtons();

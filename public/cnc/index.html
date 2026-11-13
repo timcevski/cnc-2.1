@@ -183,6 +183,15 @@
               <div class="machine-run-row" style="margin-top: 4px;">
                 <button id="btnMachineRunFromHere" class="btn btn-xs btn-primary machine-btn-run" type="button" title="Безбедно започни извршување од моментално селектираниот ред во табелата со репозиционирање на N-1">📍 Почни од тука (селектиран ред)</button>
               </div>
+              <!-- MDI РЕД ЗА 1 РЕД G-КОД КОН MACH3 -->
+              <div class="machine-mdi-row" style="margin-top: 5px; display: flex; gap: 4px; align-items: center;">
+                <input type="text" id="machineMdiInput" class="inp" style="flex:1; font-family: monospace; font-size: 11px; padding: 2px 5px; height: 23px; text-transform: uppercase;" placeholder="MDI пр. G0 X30 Y25 F1500" title="Внесете 1 ред G-код (пр. G0 X30 Y25 F1500 или M11 P1). Enter или копче ПРАТИ НА MACH3. Стрелки ↑↓ за историја.">
+                <button id="btnMachineMdiSend" class="btn btn-xs btn-primary" type="button" style="white-space: nowrap; font-weight: 700; height: 23px;" title="Испрати ја командата директно до Mach3">📤 ПРАТИ НА MACH3</button>
+              </div>
+              <div id="machineMdiFeedback" style="display:flex; justify-content:space-between; align-items:center; font-size:9.5px; color:#64748b; font-family:monospace; min-height:13px; margin-top:2px; padding:0 2px;">
+                <span id="machineMdiStatus">MDI подготвен</span>
+                <span style="color:#94a3b8;">↑↓ историја</span>
+              </div>
               <div class="machine-progress-wrap">
                 <div class="machine-progress-track">
                   <div id="machineProgressFill" class="machine-progress-fill" style="width:0%;"></div>
@@ -327,6 +336,34 @@
           <div class="form-col">
             <label>Футер (Завршен G-Код):</label>
             <textarea id="modalFooterCode" class="inp" rows="2"></textarea>
+          </div>
+        </div>
+
+        <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; padding:8px 10px; margin-top:8px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <strong style="font-size:11.5px; color:#0f172a;">⚡ Брзи пресети за Mach3 логика:</strong>
+            <div style="display:flex; gap:6px;">
+              <button id="btnPresetM10M11" type="button" class="btn btn-xs" style="background:#ecfdf5; border-color:#6ee7b7; color:#065f46; font-weight:700;" title="Постави вградени M10/M11 хардверски команди за сите вентили и диспензери без макроа (со 0.001mm микрочекор)">⚡ Брз режим (M10/M11 без макроа)</button>
+              <button id="btnPresetMacros" type="button" class="btn btn-xs" style="background:#eff6ff; border-color:#93c5fd; color:#1e40af; font-weight:700;" title="Постави макро команди: M103/M203 вентил, M104-M108/M204-M208 диспензери">📜 Режим со макроа (M103/M203)</button>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-col">
+              <label>Вентил отвори (M-команда):</label>
+              <input type="text" id="modalValveOpenCmd" class="inp" value="M11 P1" placeholder="M11 P1 или M103" title="Команда за отворање на вентилот">
+            </div>
+            <div class="form-col">
+              <label>Вентил затвори (M-команда):</label>
+              <input type="text" id="modalValveCloseCmd" class="inp" value="M10 P1" placeholder="M10 P1 или M203" title="Команда за затворање на вентилот">
+            </div>
+            <div class="form-col">
+              <label>Команда за Хомирање:</label>
+              <input type="text" id="modalHomeCmd" class="inp" value="G28.1 X2 Y2" placeholder="G28.1 X2 Y2" title="Команда за референцирање / хомирање">
+            </div>
+            <div class="form-col">
+              <label>Команда за Паркирање:</label>
+              <input type="text" id="modalParkCmd" class="inp" value="G1 X1 Y1 F2000" placeholder="G1 X1 Y1 F2000" title="Команда за одење во паркинг позиција">
+            </div>
           </div>
         </div>
 
@@ -648,6 +685,50 @@
         <div class="unsaved-actions-right">
           <button id="btnUnsavedCancel" class="btn btn-sm" type="button">✖ Откажи</button>
           <button id="btnUnsavedSave" class="btn btn-sm btn-primary" type="button">💾 Сними и продолжи</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- МОДАЛ ЗА ПРЕГЛЕД НА G-КОД (.TAP) ПРЕД ЕКСПОРТ / СТАРТУВАЊЕ -->
+  <div id="gcodePreviewModal" class="modal-overlay" style="display:none; z-index:1050;">
+    <div class="modal-dialog" style="width: 780px; max-width: 95vw; max-height: 92vh;">
+      <div class="modal-header" style="background:#f8fafc; border-bottom:1px solid #e2e8f0;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:18px;">⚡</span>
+          <div>
+            <h3 style="margin:0; font-size:14px; color:#0f172a;">Преглед на G-Код (.tap)</h3>
+            <span id="gcodePreviewSubTitle" style="font-size:11px; color:#64748b;">Генериран код за активниот таб</span>
+          </div>
+        </div>
+        <button id="btnCloseGcodePreview" class="btn btn-xs btn-danger" type="button">✖</button>
+      </div>
+
+      <div class="modal-body" style="padding:12px; display:flex; flex-direction:column; gap:10px;">
+        <!-- Статистичка лента -->
+        <div style="display:flex; flex-wrap:wrap; gap:8px; background:#f1f5f9; padding:8px 12px; border-radius:6px; border:1px solid #cbd5e1; font-size:11.5px; align-items:center; justify-content:space-between;">
+          <div style="display:flex; gap:14px; align-items:center;">
+            <span>Линии: <strong id="gcodeStatLines" style="color:#0f172a;">0</strong></span>
+            <span>Време: <strong id="gcodeStatTime" style="color:#0f172a;">~0с</strong></span>
+            <span>Патека: <strong id="gcodeStatDist" style="color:#0f172a;">0mm</strong></span>
+          </div>
+          <div>
+            <span id="gcodeStatMode" style="display:inline-block; padding:2px 8px; border-radius:12px; font-size:10.5px; font-weight:600; background:#dbeafe; color:#1e40af; border:1px solid #93c5fd;">Режим: M10/M11 (+ 0.001mm микрочекор)</span>
+          </div>
+        </div>
+
+        <!-- Преглед на код -->
+        <div style="position:relative; flex:1; min-height:280px; display:flex; flex-direction:column;">
+          <textarea id="gcodePreviewText" readonly spellcheck="false" style="width:100%; height:320px; font-family: 'Consolas', 'Courier New', monospace; font-size:11.5px; line-height:1.45; background:#0f172a; color:#38bdf8; padding:10px 12px; border-radius:6px; border:1px solid #334155; box-sizing:border-box; resize:vertical; outline:none; white-space:pre;"></textarea>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="background:#f8fafc; border-top:1px solid #e2e8f0; padding:10px 14px;">
+        <button id="btnCancelGcodePreview" class="btn btn-sm">✖ Затвори</button>
+        <div style="display:flex; gap:8px;">
+          <button id="btnCopyGcodePreview" class="btn btn-sm" style="background:#f1f5f9; border-color:#cbd5e1; font-weight:600;">📋 Копирај сè</button>
+          <button id="btnSaveGcodeFromPreview" class="btn btn-sm btn-success" style="font-weight:700;">💾 Сними .TAP датотека</button>
+          <button id="btnRunFromGcodePreview" class="btn btn-sm btn-primary" style="font-weight:700;">▶ Пушти директно во Mach3</button>
         </div>
       </div>
     </div>

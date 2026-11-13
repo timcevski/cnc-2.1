@@ -21,8 +21,10 @@ class Mach3Bridge
     static List<int> loweredDispensers = new List<int>();
     static int activeDispenserId = 1;
     static int totalLines = 0;
-    static string valveOpenCmd = "M103";
-    static string valveCloseCmd = "M203";
+    static string valveOpenCmd = "M11 P1";
+    static string valveCloseCmd = "M10 P1";
+    static Dictionary<int, string> dispenserLowerCmds = new Dictionary<int, string>();
+    static Dictionary<int, string> dispenserRaiseCmds = new Dictionary<int, string>();
 
     static bool EnsureMach3()
     {
@@ -211,9 +213,17 @@ class Mach3Bridge
             {
                 Console.WriteLine("[" + time + "] [CONFIG] Синхронизација со апликацијата.");
                 Match mOpen = Regex.Match(body, "\"valveOpenCmd\"\\s*:\\s*\"([^\"]+)\"");
-                if (mOpen.Success) valveOpenCmd = mOpen.Groups[1].Value.ToUpper();
+                if (mOpen.Success) valveOpenCmd = mOpen.Groups[1].Value.ToUpper().Trim();
                 Match mClose = Regex.Match(body, "\"valveCloseCmd\"\\s*:\\s*\"([^\"]+)\"");
-                if (mClose.Success) valveCloseCmd = mClose.Groups[1].Value.ToUpper();
+                if (mClose.Success) valveCloseCmd = mClose.Groups[1].Value.ToUpper().Trim();
+
+                MatchCollection mDisps = Regex.Matches(body, "{\"id\"\\s*:\\s*(\\d+)[^}]*\"lowerCmd\"\\s*:\\s*\"([^\"]+)\"[^}]*\"raiseCmd\"\\s*:\\s*\"([^\"]+)\"}");
+                foreach (Match md in mDisps)
+                {
+                    int dId = int.Parse(md.Groups[1].Value);
+                    dispenserLowerCmds[dId] = md.Groups[2].Value.ToUpper().Trim();
+                    dispenserRaiseCmds[dId] = md.Groups[3].Value.ToUpper().Trim();
+                }
 
                 SendJson(res, BuildSnapshotJson());
                 return;
@@ -226,6 +236,11 @@ class Mach3Bridge
                 Match mGcode = Regex.Match(body, "\"gcode\"\\s*:\\s*\"([\\s\\S]*?)(?<!\\\\)\"");
                 string gcode = mGcode.Success ? Regex.Unescape(mGcode.Groups[1].Value) : "";
 
+                Match mOpen = Regex.Match(body, "\"valveOpenCmd\"\\s*:\\s*\"([^\"]+)\"");
+                if (mOpen.Success) valveOpenCmd = mOpen.Groups[1].Value.ToUpper().Trim();
+                Match mClose = Regex.Match(body, "\"valveCloseCmd\"\\s*:\\s*\"([^\"]+)\"");
+                if (mClose.Success) valveCloseCmd = mClose.Groups[1].Value.ToUpper().Trim();
+
                 if (isMachConnected && scripter != null && !string.IsNullOrEmpty(gcode))
                 {
                     string tempFile = Path.Combine(Path.GetTempPath(), "active_job.tap");
@@ -234,7 +249,15 @@ class Mach3Bridge
 
                     lock (lockObj)
                     {
-                        scripter.LoadGCodeFile(tempFile);
+                        scripter.LoadFile(tempFile);
+                        int maxWaitMs = 15000;
+                        int waited = 0;
+                        while (Convert.ToInt32(scripter.IsLoading()) != 0 && waited < maxWaitMs)
+                        {
+                            System.Threading.Thread.Sleep(50);
+                            waited += 50;
+                        }
+                        System.Threading.Thread.Sleep(100);
                         scripter.DoOEMButton(1000); // Cycle Start
                     }
                 }
@@ -346,13 +369,62 @@ class Mach3Bridge
                             }
                             loweredDispensers.Clear();
                         }
+                        else if (cmd.StartsWith("PULSE:"))
+                        {
+                            int duration = 100;
+                            int.TryParse(cmd.Substring(6), out duration);
+                            if (duration <= 0) duration = 100;
+
+                            bool isM11 = valveOpenCmd.Contains("M11");
+                            if (isMachConnected && scripter != null)
+                            {
+                                if (isM11)
+                                {
+                                    scripter.Code(valveOpenCmd);
+                                    scripter.Code("G91 G1 X0.001 F200 G90");
+                                    System.Threading.Thread.Sleep(duration);
+                                    scripter.Code(valveCloseCmd);
+                                    scripter.Code("G91 G1 X-0.001 F200 G90");
+                                }
+                                else
+                                {
+                                    scripter.Code(valveOpenCmd);
+                                    System.Threading.Thread.Sleep(duration);
+                                    scripter.Code(valveCloseCmd);
+                                }
+                            }
+                            valveOpen = false;
+                        }
                         else
                         {
-                            if (isMachConnected && scripter != null) scripter.Code(cmd);
+                            string[] lines = cmd.Split(new char[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                            foreach (string line in lines)
+                            {
+                                string trimmed = line.Trim();
+                                if (!string.IsNullOrEmpty(trimmed) && isMachConnected && scripter != null)
+                                {
+                                    scripter.Code(trimmed);
+                                }
+                            }
 
                             string upper = cmd.ToUpper().Trim();
-                            if (upper == valveOpenCmd) valveOpen = true;
-                            if (upper == valveCloseCmd) valveOpen = false;
+                            if (!string.IsNullOrEmpty(valveOpenCmd) && upper.Contains(valveOpenCmd)) valveOpen = true;
+                            if (!string.IsNullOrEmpty(valveCloseCmd) && upper.Contains(valveCloseCmd)) valveOpen = false;
+
+                            foreach (KeyValuePair<int, string> kvp in dispenserLowerCmds)
+                            {
+                                if (!string.IsNullOrEmpty(kvp.Value) && upper.Contains(kvp.Value))
+                                {
+                                    if (!loweredDispensers.Contains(kvp.Key)) loweredDispensers.Add(kvp.Key);
+                                }
+                            }
+                            foreach (KeyValuePair<int, string> kvp in dispenserRaiseCmds)
+                            {
+                                if (!string.IsNullOrEmpty(kvp.Value) && upper.Contains(kvp.Value))
+                                {
+                                    loweredDispensers.Remove(kvp.Key);
+                                }
+                            }
                         }
                     }
                 }

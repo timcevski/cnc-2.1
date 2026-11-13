@@ -23,8 +23,10 @@ CNCApp.State = {
     systemDelayLower: 150,
     systemDelayRaise: 150,
     mCommandLatency: 120,
-    valveOpenCmd: "M103",
-    valveCloseCmd: "M203",
+    valveOpenCmd: "M11 P1",
+    valveCloseCmd: "M10 P1",
+    homeCommand: "G28.1 X2 Y2",
+    parkCommand: "G1 X1 Y1 F2000",
     timeUnit: "ms",
     decimalSeparator: ".",
     minX: -5,
@@ -44,6 +46,10 @@ CNCApp.State = {
   normalizeMachineConfig: function() {
     var m = this.machine;
     if (!m) return;
+    if (!m.valveOpenCmd) m.valveOpenCmd = "M11 P1";
+    if (!m.valveCloseCmd) m.valveCloseCmd = "M10 P1";
+    if (!m.homeCommand) m.homeCommand = "G28.1 X2 Y2";
+    if (!m.parkCommand) m.parkCommand = "G1 X1 Y1 F2000";
     if (typeof m.minX !== 'number' || isNaN(m.minX)) m.minX = -5;
     if (typeof m.maxX !== 'number' || isNaN(m.maxX) || m.maxX <= m.minX) m.maxX = 350;
     if (typeof m.minY !== 'number' || isNaN(m.minY)) m.minY = -5;

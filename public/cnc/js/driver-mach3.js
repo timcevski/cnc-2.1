@@ -162,8 +162,10 @@ CNCApp.Mach3BridgeDriver = {
       });
     }
     return {
-      valveOpenCmd: m.valveOpenCmd || 'M103',
-      valveCloseCmd: m.valveCloseCmd || 'M203',
+      valveOpenCmd: m.valveOpenCmd || 'M11 P1',
+      valveCloseCmd: m.valveCloseCmd || 'M10 P1',
+      homeCommand: m.homeCommand || 'G28.1 X2 Y2',
+      parkCommand: m.parkCommand || 'G1 X1 Y1 F2000',
       dispensers: outDisp
     };
   },
@@ -325,8 +327,8 @@ CNCApp.Mach3BridgeDriver = {
     var self = this;
     var upper = String(cmdStr || '').toUpperCase().trim();
     var m = CNCApp.State.machine;
-    var valveOpenCmd = String(m.valveOpenCmd || 'M103').toUpperCase().trim();
-    var valveCloseCmd = String(m.valveCloseCmd || 'M203').toUpperCase().trim();
+    var valveOpenCmd = String(m.valveOpenCmd || 'M11 P1').toUpperCase().trim();
+    var valveCloseCmd = String(m.valveCloseCmd || 'M10 P1').toUpperCase().trim();
 
     var bodyObj = { cmd: String(cmdStr || '') };
     if (upper.indexOf('PULSE:') === 0) {
@@ -339,18 +341,20 @@ CNCApp.Mach3BridgeDriver = {
 
       if (upper.indexOf('PULSE:') === 0) {
         self.coords.valveOpen = true;
-      } else if (upper === valveOpenCmd) {
+      } else if (valveOpenCmd && upper.indexOf(valveOpenCmd) !== -1) {
         self.coords.valveOpen = true;
-      } else if (upper === valveCloseCmd) {
+      } else if (valveCloseCmd && upper.indexOf(valveCloseCmd) !== -1) {
         self.coords.valveOpen = false;
       } else {
         for (var i = 0; i < m.dispensers.length; i++) {
           var d = m.dispensers[i];
-          if (upper === String(d.lowerCmd || '').toUpperCase().trim()) {
+          var dLower = String(d.lowerCmd || '').toUpperCase().trim();
+          var dRaise = String(d.raiseCmd || '').toUpperCase().trim();
+          if (dLower && upper.indexOf(dLower) !== -1) {
             self._addLowered(d.id);
             break;
           }
-          if (upper === String(d.raiseCmd || '').toUpperCase().trim()) {
+          if (dRaise && upper.indexOf(dRaise) !== -1) {
             self._removeLowered(d.id);
             break;
           }
