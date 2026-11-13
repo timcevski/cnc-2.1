@@ -1,0 +1,6 @@
+{
+  "name": "CNC Dispenser V2.0",
+  "description": "Офлајн CNC G-Code веб апликација за повеќеканални пневматски диспензери за боја.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

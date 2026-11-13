@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="mk">
+<head>
+  <meta charset="UTF-8">
+  <title>CNC Dispenser V2.1</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="top-bar">
+    <!-- РЕД 1: ДАТОТЕКИ И ПРОЕКТ -->
+    <div class="toolbar-row file-row">
+      <div class="tool-group">
+        <button id="btnOpenTxt" class="btn btn-sm btn-file-txt" title="Вчитај чист TXT фајл со координати">TXT</button>
+        <button id="btnOpenLegacyCsv" class="btn btn-sm btn-file-legacy" title="Стар CSV со авто-офсет пресметка">Стар CSV</button>
+        <button id="btnOpenProjectCsv" class="btn btn-sm btn-file-proj" title="Отвори зачуван CNC Проект">Отвори Проект</button>
+        <button id="btnSaveProjectCsv" class="btn btn-sm btn-primary" title="Сними проект (Ctrl+S)">Сними Проект</button>
+        <button id="btnCloseProject" class="btn btn-sm btn-file-close" title="Затвори го тековниот проект (со проверка за незачувани измени)">✖ Затвори Проект</button>
+        <div id="projectInfoBadge" class="project-info-badge" title="Кликнете за да го преименувате проектот">
+          <span class="proj-icon">📁</span>
+          <span id="projectNameDisplay" class="proj-name">Нов проект.csv</span>
+          <span id="projectSaveStatus" class="proj-status saved">✔ Зачувано</span>
+        </div>
+        <span class="sep">|</span>
+        <button id="btnOpenSvgGenTop" class="btn btn-sm btn-file-svg" title="Отвори волшебник за автоматско генерирање на CNC патека со точки од SVG">⚡ Патека од SVG</button>
+        <button id="btnExportForAi" class="btn btn-sm btn-file-ai" title="Ископирај ги SVG и точките од табелата во clipboard за испраќање во чатот со AI">📋 За AI</button>
+        <button id="btnOpenSettings" class="btn btn-sm btn-outline" title="Конфигурација на машината и диспензерите">⚙️ Поставки</button>
+        <input type="file" id="fileInput" style="display:none;">
+      </div>
+      <div class="tool-group">
+        <button id="btnExportGcode" class="btn btn-sm btn-success">⚡ Експорт G-Код (.tap)</button>
+        <div id="cycleTimeBox" class="cycle-box" title="Кликнете за детална статистика">
+          <span id="cycleTimeDisplay" class="cycle-main">Време: ~0с</span>
+          <span id="cycleSubDisplay" class="cycle-sub">Патека: 0m</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- РЕД 2: МАСОВНИ ПРОМЕНИ (ПАРАМЕТРИ) -->
+    <div class="toolbar-row batch-row">
+      <div class="tool-group batch-group-inner">
+        <span class="group-label batch-label">Масовно:</span>
+
+        <div class="batch-subgroup">
+          <label>Боја:</label>
+          <select id="batchColor" class="inp inp-sm"></select>
+        </div>
+
+        <div class="batch-subgroup">
+          <label>F:</label>
+          <input type="number" id="batchSpeed" class="inp inp-sm" style="width:60px;" placeholder="Брзина">
+          <button id="btnSpeedMinus5" class="btn btn-xs btn-step">-5%</button>
+          <button id="btnSpeedPlus5" class="btn btn-xs btn-step">+5%</button>
+        </div>
+        
+        <div class="batch-subgroup">
+          <label>Време:</label>
+          <input type="number" id="batchTime" class="inp inp-sm" style="width:52px;" placeholder="ms">
+          <button id="btnTimeMinus5" class="btn btn-xs btn-step">-5%</button>
+          <button id="btnTimePlus5" class="btn btn-xs btn-step">+5%</button>
+        </div>
+
+        <div class="batch-subgroup">
+          <label>ΔX:</label>
+          <input type="number" id="batchOffsetX" class="inp inp-sm" style="width:52px;" step="0.05" value="0">
+          <label>ΔY:</label>
+          <input type="number" id="batchOffsetY" class="inp inp-sm" style="width:52px;" step="0.05" value="0">
+        </div>
+
+        <div class="batch-subgroup">
+          <label>Гр.1:</label>
+          <input type="text" id="batchGroup1" class="inp inp-sm" style="width:42px;">
+          <label>Гр.2:</label>
+          <input type="text" id="batchGroup2" class="inp inp-sm" style="width:42px;">
+        </div>
+
+        <button id="btnApplyBatchValues" class="btn btn-sm btn-warning font-semibold">✔ Примени параметри</button>
+      </div>
+    </div>
+
+    <!-- РЕД 3: СЕЛЕКЦИЈА И ФИЛТРИ -->
+    <div class="toolbar-row select-row">
+      <div class="tool-group select-group-inner">
+        <span class="group-label select-label">Селекција:</span>
+        <button id="btnSelectAll" class="btn btn-sm btn-primary">✅ SELECT ALL</button>
+        <button id="btnDeselectAll" class="btn btn-sm">Деселектирај</button>
+        <button id="btnInvertSelect" class="btn btn-sm">Инверзија</button>
+        <button id="btnSelectIntermediate" class="btn btn-sm btn-intermed" title="Селектирај ги само меѓуточките во линија кои не влијаат на диспензерот/дизната (без Доле/Горе/Вентил) за брза промена на брзина">⚡ Меѓуточки (Брзина)</button>
+        <span class="sep">|</span>
+        <label>По боја:</label>
+        <select id="selByColor" class="inp inp-sm"><option value="">-- Избери --</option></select>
+        <label>По група:</label>
+        <select id="selByGroup" class="inp inp-sm"><option value="">-- Нема групи --</option></select>
+      </div>
+    </div>
+  </header>
+
+  <!-- ЛЕНТА СО ТАБОВИ ЗА НЕЗАВИСНИ ПРОЕКТИ -->
+  <nav id="tabBar" class="tab-bar" aria-label="Отворени проекти">
+    <div id="tabsList" class="tabs-list"></div>
+    <button id="btnNewTab" class="btn btn-xs tab-new-btn" type="button" title="Отвори нов празен проект во нов таб">➕ Нов таб</button>
+  </nav>
+
+  <main class="main-container">
+    <!-- ЛЕВА КОЛОНА: ТАБЕЛА ГОРЕ + МАШИНСКИ ПАНЕЛ ДОЛУ -->
+    <div id="leftColumn" class="left-column">
+      <section id="tablePanel" class="table-panel">
+        <div class="table-actions">
+          <button id="btnAddPoint" class="btn btn-xs btn-primary">➕ Додади точка</button>
+          <button id="btnPresetLine" class="btn btn-xs" style="background:#eff6ff;border-color:#93c5fd;color:#1d4ed8;font-weight:600;" title="Постави непрекината линија за селектирани последователни точки од иста боја">📏 Линија</button>
+          <button id="btnSelectPassPoints" class="btn btn-xs" style="background:#f0fdf4;border-color:#86efac;color:#166534;font-weight:600;" title="Брзо селектирај ги меѓуточките во линија (точките што не влијаат на диспензерот и дизната) за брза корекција на брзина">⚡ Меѓуточки</button>
+          <button id="btnMoveUp" class="btn btn-xs">▲ Нагоре</button>
+          <button id="btnMoveDown" class="btn btn-xs">▼ Надолу</button>
+          <button id="btnDeleteSelected" class="btn btn-xs btn-danger">🗑️ Избриши</button>
+          <button id="btnUndo" class="btn btn-xs">Undo (Ctrl+Z)</button>
+          <button id="btnRedo" class="btn btn-xs">Redo (Ctrl+Y)</button>
+          <span id="selectedCount" class="badge">Селектирани: 0</span>
+        </div>
+        <div class="table-scroll">
+          <table id="pointsTable">
+            <thead>
+              <tr>
+                <th title="Повлечи за прередување">↕</th>
+                <th data-field="active" title="Десен клик за групно чекирање/одчекирање">Акт</th>
+                <th>Р.бр</th>
+                <th>X</th>
+                <th>Y</th>
+                <th data-field="speed" title="Кликни за групно менување брзина на селектираните точки" style="cursor:pointer;color:#1d4ed8;">Брзина ⚡</th>
+                <th data-field="lower" title="Десен клик за групно чекирање/одчекирање">Доле</th>
+                <th data-field="valveStart" title="Десен клик за групно чекирање/одчекирање">Боја ст.</th>
+                <th>Време</th>
+                <th data-field="valveStop" title="Десен клик за групно чекирање/одчекирање">Боја стп.</th>
+                <th data-field="raise" title="Десен клик за групно чекирање/одчекирање">Горе</th>
+                <th>Боја</th>
+                <th>Група 1</th>
+                <th>Група 2</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <div id="leftPaneSplitter" class="pane-splitter" title="Повлечете нагоре/надолу за промена на висината меѓу табелата и панелот за машина">
+        <span class="splitter-grip">⋯</span>
+      </div>
+
+      <!-- ДОЛУ ЛЕВО: ВГРАДЕН ПАНЕЛ ЗА КОНТРОЛА НА МАШИНА (НЕЗАВИСЕН ОД ТАБОВИ) -->
+      <section id="machinePanel" class="machine-panel">
+        <div class="machine-header">
+          <div class="machine-header-left">
+            <span class="machine-title">🎛️ Машина</span>
+            <select id="machineDriverSelect" class="inp inp-sm machine-select" title="Избор на комуникациски драјвер">
+              <option value="simulator">🧪 Симулатор (Тест)</option>
+              <option value="mach3">🔌 Mach3 Bridge (127.0.0.1:8765)</option>
+            </select>
+            <button id="btnMachineConnect" class="btn btn-xs btn-primary" type="button">🔌 Поврзи</button>
+            <span id="machineStatusBadge" class="machine-badge status-disconnected">НЕПОВРЗАНА</span>
+            <span id="machineJobSummary" class="machine-job-summary" style="display:none;"></span>
+          </div>
+          <div class="machine-header-right">
+            <button id="btnToggleMachinePanel" class="btn btn-xs" type="button" title="Собери го панелот за повеќе простор на табелата">▾ Собери</button>
+          </div>
+        </div>
+
+        <div id="machinePanelBody" class="machine-body">
+          <div id="machineSafetyBanner" class="machine-banner banner-warn" style="display:none;">
+            <span id="machineSafetyText" class="machine-banner-text"></span>
+            <button id="btnJumpToRunningTab" class="btn btn-xs" type="button" style="display:none;">👁 Прикажи таб</button>
+          </div>
+
+          <div class="machine-grid">
+            <!-- ЛЕВ ДЕЛ: ПРОГРАМА И БЕЗБЕДНОСТ -->
+            <div class="machine-card">
+              <div class="machine-card-title">Извршување програма</div>
+              <div class="machine-run-row">
+                <button id="btnMachineRun" class="btn btn-sm btn-success machine-btn-run" type="button">▶ Пушти активен таб</button>
+              </div>
+              <div class="machine-ctrl-row">
+                <button id="btnMachinePause" class="btn btn-xs btn-warning" type="button">⏸ Пауза</button>
+                <button id="btnMachineStop" class="btn btn-xs btn-danger" type="button">⏹ СТОП</button>
+                <button id="btnMachineReset" class="btn btn-xs" type="button">🔄 Reset</button>
+              </div>
+              <div class="machine-run-row" style="margin-top: 4px;">
+                <button id="btnMachineRunFromHere" class="btn btn-xs btn-primary machine-btn-run" type="button" title="Безбедно започни извршување од моментално селектираниот ред во табелата со репозиционирање на N-1">📍 Почни од тука (селектиран ред)</button>
+              </div>
+              <div class="machine-progress-wrap">
+                <div class="machine-progress-track">
+                  <div id="machineProgressFill" class="machine-progress-fill" style="width:0%;"></div>
+                </div>
+                <span id="machineProgressText" class="machine-progress-text">Подготвено</span>
+              </div>
+              <div id="simSpeedRow" class="machine-sim-row">
+                <span class="machine-mini-lbl">Симулатор:</span>
+                <button class="btn btn-xs btn-primary" type="button" data-sim-speed="1">1x</button>
+                <button class="btn btn-xs" type="button" data-sim-speed="5">5x</button>
+                <button class="btn btn-xs" type="button" data-sim-speed="15">15x</button>
+              </div>
+              <label class="machine-lock-check" title="Доколку е штиклирано, менувањето табови се заклучува додека машината работи (Строг производствен режим)">
+                <input type="checkbox" id="chkStrictTabLock">
+                <span>🔒 Строг режим (заклучи табови при работа)</span>
+              </label>
+            </div>
+
+            <!-- ДЕСЕН ДЕЛ: 2D DRO КООРДИНАТИ, TEACH, JOG, ДИСПЕНЗЕРИ И БРЗИ КОМАНДИ -->
+            <div class="machine-card machine-card-right">
+              <div class="dro-panel">
+                <div class="dro-coords">
+                  <span class="dro-axis"><em>X</em><strong id="droX">0.000</strong></span>
+                  <span class="dro-axis"><em>Y</em><strong id="droY">0.000</strong></span>
+                  <span id="droIOState" class="dro-io">Исклучено</span>
+                </div>
+                <div class="dro-zero-row">
+                  <button id="btnZeroX" class="btn btn-xs dro-zero-btn" type="button">Zero X</button>
+                  <button id="btnZeroY" class="btn btn-xs dro-zero-btn" type="button">Zero Y</button>
+                  <button id="btnZeroAll" class="btn btn-xs dro-zero-btn" type="button">Zero XY</button>
+                </div>
+              </div>
+
+              <div class="teach-row">
+                <span class="machine-mini-lbl">Дисп.:</span>
+                <select id="machineActiveDispenser" class="inp inp-sm machine-disp-select"></select>
+                <button id="btnMachineTeach" class="btn btn-xs btn-outline machine-btn-teach" type="button" title="Преземи тековна координата од машината минус офсетот на избраниот диспензер и додај точка во табелата">📍 Преземи точка</button>
+              </div>
+
+              <div class="jog-test-row">
+                <div id="machineJogBox" class="jog-box">
+                  <div class="jog-header">
+                    <span class="machine-mini-lbl">Jog:</span>
+                    <select id="jogStepSelect" class="inp inp-sm jog-step-select">
+                      <option value="0.05">0.05mm</option>
+                      <option value="0.1">0.1mm</option>
+                      <option value="0.5">0.5mm</option>
+                      <option value="1" selected>1mm</option>
+                      <option value="5">5mm</option>
+                      <option value="10">10mm</option>
+                    </select>
+                  </div>
+                  <div class="jog-grid">
+                    <div class="jog-grid-row">
+                      <span class="jog-spacer"></span>
+                      <button class="btn btn-xs jog-btn" type="button" data-jog-axis="Y" data-jog-dir="1">Y+</button>
+                      <span class="jog-spacer"></span>
+                    </div>
+                    <div class="jog-grid-row">
+                      <button class="btn btn-xs jog-btn" type="button" data-jog-axis="X" data-jog-dir="-1">X-</button>
+                      <button class="btn btn-xs jog-btn" type="button" data-jog-axis="Y" data-jog-dir="-1">Y-</button>
+                      <button class="btn btn-xs jog-btn" type="button" data-jog-axis="X" data-jog-dir="1">X+</button>
+                    </div>
+                  </div>
+                  <div class="kbd-switch-row" title="Изберете дали стрелките на тастатурата ги поместуваат селектираните точки во графикот или ја придвижуваат машината">
+                    <span class="kbd-switch-lbl">⌨️:</span>
+                    <button id="btnKbdModePoints" class="btn btn-xs kbd-mode-btn active-points" type="button">📌 Точки</button>
+                    <button id="btnKbdModeMachine" class="btn btn-xs kbd-mode-btn" type="button">🕹️ Машина</button>
+                  </div>
+                </div>
+
+                <div class="mdi-box">
+                  <div class="disp-header-row">
+                    <span class="machine-mini-lbl">Диспензери: <span id="dispActiveBadge" class="disp-status-pill">—</span></span>
+                    <button id="btnRaiseAllDispensers" class="btn btn-xs raise-all-btn" type="button" title="Безбедно подигни ги сите диспензери горе">⬆ Сите</button>
+                  </div>
+                  <div id="machineDispButtons" class="disp-btns-row"></div>
+                  <div class="valve-row">
+                    <button id="btnMachineValve" class="btn btn-xs valve-btn" type="button">💧 Вентил: ЗАТВОРЕН</button>
+                    <button id="btnMachinePulse100" class="btn btn-xs pulse-btn" type="button" title="Отвори вентил на 100ms и веднаш затвори">⚡ 100ms</button>
+                  </div>
+                  <div class="quick-cmd-row">
+                    <button id="btnCmdHomeRef" class="btn btn-xs quick-cmd-btn" type="button" title="Безбедно хомирање: прво мора сите диспензери да се подигнати">🏠 G28.1 X2 Y2</button>
+                    <button id="btnCmdParkPos" class="btn btn-xs quick-cmd-btn" type="button" title="Оди на позиција X1 Y1 (F2000): прво мора сите диспензери да се подигнати">🎯 G1 X1 Y1 F2000</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ДЕСНО: 2D ГРАФИК -->
+    <section class="canvas-panel">
+      <div class="canvas-bar">
+        <!-- Ред 1: Контроли за цртање, оди на клик, центрирање, SVG подлога и координати -->
+        <div class="canvas-row">
+          <div class="canvas-tools">
+            <button id="btnToggleAddMode" class="btn btn-xs btn-addmode-off">➕ Точка: ИСКЛ</button>
+            <button id="btnToggleMoveToClick" class="btn btn-xs btn-moveclick-off" type="button" title="Кога е ВКЛ, клик на графикот го носи избраниот диспензер до таа точка (само кога сите диспензери се кренати)">🎯 Оди на клик: ИСКЛ</button>
+            <button id="btnResetView" class="btn btn-xs">🎯 Центрирај</button>
+            <span class="sep">|</span>
+            <button id="btnLoadSvg" class="btn btn-xs btn-svg-load">📁 Вчитај SVG</button>
+            <button id="btnClearSvg" class="btn btn-xs btn-svg-clear">🗑️ Отстрани</button>
+            <button id="btnToggleSvg" class="btn btn-xs" style="display:inline-flex;align-items:center;gap:2px;" title="Вклучи/Исклучи приказ на референтната SVG подлога на графикот">🖼️ SVG: ВКЛ</button>
+          </div>
+          <div class="coord-box">
+            <span id="coordDisplay" class="coord-label">X: 0.000, Y: 0.000</span>
+          </div>
+        </div>
+
+        <!-- Ред 2: Безбедносен клиренс и филтри за бои/диспензери -->
+        <div class="canvas-row canvas-subrow">
+          <div class="canvas-tools">
+            <button id="btnToggleClearance" class="btn btn-xs" style="background:#f0fdf4;border-color:#86efac;color:#166534;font-weight:600;" title="Вклучи/Исклучи приказ на безбедносен клиренс (круг до ѕид) за автоматски пресметаните точки">⭕ Клиренс: ВКЛ</button>
+            <span class="sep">|</span>
+            <span style="font-size:10.5px;color:#475569;font-weight:600;margin-right:2px;">Бои:</span>
+            <div id="dispenserFilterButtons" style="display:inline-flex;gap:3px;align-items:center;"></div>
+          </div>
+        </div>
+      </div>
+      <div class="canvas-wrapper" id="canvasWrapper">
+        <canvas id="mainCanvas"></canvas>
+      </div>
+    </section>
+  </main>
+
+  <!-- МОДАЛ ЗА ПОСТАВКИ -->
+  <div id="settingsModal" class="modal-overlay" style="display:none;">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>⚙️ Конфигурација на машина и калибрација</h3>
+        <button id="btnCloseSettings" class="btn btn-xs btn-danger">✖</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <div class="form-col">
+            <label>Хедер (Почетен G-Код):</label>
+            <textarea id="modalHeaderCode" class="inp" rows="2" placeholder="G21 G90..."></textarea>
+          </div>
+          <div class="form-col">
+            <label>Футер (Завршен G-Код):</label>
+            <textarea id="modalFooterCode" class="inp" rows="2"></textarea>
+          </div>
+        </div>
+
+        <div class="form-row mt-2">
+          <div class="form-col">
+            <label>Единица за G4 време во G-код:</label>
+            <select id="modalTimeUnit" class="inp">
+              <option value="ms">Милисекунди (ms) -> G4 P150 (Цел број)</option>
+              <option value="s">Секунди (s) -> G4 P0.150 (Конверзија)</option>
+            </select>
+          </div>
+          <div class="form-col">
+            <label>Децимален сепаратор за X/Y:</label>
+            <select id="modalDecimalSeparator" class="inp">
+              <option value=".">Точка (.) - Стандард ISO</option>
+              <option value=",">Запирка (,) - Европски CNC</option>
+            </select>
+          </div>
+          <div class="form-col">
+            <label>M-Латенција за пресметка (ms):</label>
+            <input type="number" id="modalMLatency" class="inp" value="120" title="Време за обработка на секоја M-команда од CNC контролерот">
+          </div>
+        </div>
+
+        <div class="form-row mt-2">
+          <div class="form-col">
+            <label>Пауза спуштање (ms):</label>
+            <input type="number" id="modalDelayLower" class="inp" value="150">
+          </div>
+          <div class="form-col">
+            <label>Пауза кревање (ms):</label>
+            <input type="number" id="modalDelayRaise" class="inp" value="150">
+          </div>
+          <div class="form-col">
+            <label>Чекор стрелки (mm):</label>
+            <input type="number" id="modalStepIncrement" class="inp" step="0.01" value="0.05">
+          </div>
+        </div>
+
+        <div class="form-row mt-2">
+          <div class="form-col">
+            <label>Мин X лимит (mm):</label>
+            <input type="number" id="modalMinX" class="inp" step="1" value="-5" title="Долна машинска граница X (стандардно -5mm заради офсетот на Д1)">
+          </div>
+          <div class="form-col">
+            <label>Макс X лимит (mm):</label>
+            <input type="number" id="modalMaxX" class="inp" step="1" value="350" title="Максимален од на машината по X (mm)">
+          </div>
+          <div class="form-col">
+            <label>Мин Y лимит (mm):</label>
+            <input type="number" id="modalMinY" class="inp" step="1" value="-5" title="Долна машинска граница Y (стандардно -5mm)">
+          </div>
+          <div class="form-col">
+            <label>Макс Y лимит (mm):</label>
+            <input type="number" id="modalMaxY" class="inp" step="1" value="300" title="Максимален од на машината по Y (mm)">
+          </div>
+          <div class="form-col">
+            <label>Брзина Оди на клик (F):</label>
+            <input type="number" id="modalMoveClickSpeed" class="inp" step="100" value="3000" title="Брзина на движење при клик на 2D графикот (mm/min)">
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:14px;">
+          <h4 style="margin:0;">Конфигурација на Диспензери и Офсети (+ кон машинска нула):</h4>
+          <button id="btnAddDispenser" class="btn btn-xs btn-primary">➕ Додади диспензер</button>
+        </div>
+        
+        <div class="dispensers-scroll" style="margin-top:6px;">
+          <table class="settings-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Име</th>
+                <th>Боја</th>
+                <th>Спушти (M)</th>
+                <th>Крени (M)</th>
+                <th>Offset X</th>
+                <th>Offset Y</th>
+                <th>Бриши</th>
+              </tr>
+            </thead>
+            <tbody id="dispensersTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnResetCalibratedDispensers" class="btn btn-sm" style="background:#fef3c7;color:#92400e;border-color:#f59e0b;font-weight:600;" title="Постави ги точно калибрираните фабрички вредности: D1(-0.3, 34.45), чекор +40mm и 4-реден футер">⚡ Фабрички калибрирани офсети & Футер (V2.0)</button>
+        <button id="btnExportMachineProfile" class="btn btn-sm">Зачувај профил (.json)</button>
+        <button id="btnImportMachineProfile" class="btn btn-sm">Вчитај профил (.json)</button>
+        <input type="file" id="machineProfileInput" style="display:none;" accept=".json">
+        <button id="btnSaveSettings" class="btn btn-sm btn-primary">Зачувај и Затвори</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- МОДАЛ ЗА АВТОМАТСКА ПАТЕКА ОД SVG -->
+  <div id="svgGeneratorModal" class="modal-overlay" style="display:none;">
+    <div class="modal-dialog" style="width: 880px; max-width: 95vw;">
+      <div class="modal-header" style="background:#faf5ff;border-bottom:1px solid #e9d5ff;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:18px;">⚡</span>
+          <div>
+            <h3 style="margin:0;color:#6b21a8;font-size:14px;">Автоматски генератор на CNC патека од SVG</h3>
+            <p style="margin:0;font-size:11px;color:#7e22ce;">Вчитајте векторска графика (SVG) и креирајте подготвена CNC програма за диспензерите со 1 клик</p>
+          </div>
+        </div>
+        <button id="btnCloseSvgGen" class="btn btn-xs btn-danger">✖</button>
+      </div>
+
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:12px;overflow:auto;">
+        <!-- ИЗБОР НА SVG / ШАБЛОН -->
+        <div style="background:#f8fafc;padding:8px 10px;border-radius:6px;border:1px solid #e2e8f0;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <strong style="color:#1e293b;font-size:11.5px;">Извор на SVG слика:</strong>
+            <div style="display:flex;gap:4px;">
+              <button id="btnSvgGenLoadFile" class="btn btn-xs btn-primary">📁 Отвори мој SVG</button>
+              <button id="btnSvgGenUseCurrent" class="btn btn-xs btn-outline">🖼️ Користи веќе вчитан SVG</button>
+              <input type="file" id="svgGenFileInput" accept=".svg" style="display:none;">
+            </div>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <span style="font-size:11px;color:#64748b;">Брзи тест примероци:</span>
+            <button id="btnSvgSampleChannels" class="btn btn-xs" style="background:#e0e7ff;color:#4338ca;border-color:#c7d2fe;font-weight:600;">📐 Канали и езерца</button>
+            <button id="btnSvgSampleStar" class="btn btn-xs" style="background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe;">⭐ Ѕвезда</button>
+            <button id="btnSvgSampleFlower" class="btn btn-xs" style="background:#ecfdf5;color:#047857;border-color:#a7f3d0;">🌸 Цвет (3 бои)</button>
+            <button id="btnSvgGenPasteCode" class="btn btn-xs">📋 Пастирај SVG код</button>
+          </div>
+        </div>
+
+        <!-- ДВОКОЛОНСКИ РАСПОРЕД: ПРЕГЛЕД ЛЕВО, ПОСТАВКИ ДЕСНО -->
+        <div style="display:flex;gap:12px;">
+          <!-- ЛЕВО: ВИЗУЕЛЕН ПРЕГЛЕД НА SVG -->
+          <div style="flex:1;display:flex;flex-direction:column;gap:6px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span style="font-weight:600;color:#334155;font-size:11px;">Преглед на SVG:</span>
+              <span id="svgGenStats" style="font-size:10.5px;color:#64748b;">Детектирање...</span>
+            </div>
+            <div id="svgGenPreviewSvg" style="width:100%;height:180px;background:#ffffff;border:1px dashed #cbd5e1;border-radius:6px;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:8px;">
+            </div>
+
+            <!-- МАПИРАЊЕ НА БОИ -->
+            <div style="background:#f1f5f9;padding:8px;border-radius:6px;border:1px solid #e2e8f0;margin-top:2px;">
+              <div style="font-weight:600;font-size:11px;color:#1e3a8a;margin-bottom:4px;">
+                🎨 Автоматско мапирање на бои кон Диспензери:
+              </div>
+              <div id="svgGenColorList" style="max-height:85px;overflow-y:auto;display:flex;flex-direction:column;">
+                <!-- Динамички се полни -->
+              </div>
+            </div>
+          </div>
+
+          <!-- ДЕСНО: ПАРАМЕТРИ ЗА ГЕНЕРИРАЊЕ -->
+          <div style="flex:1.1;display:flex;flex-direction:column;gap:8px;background:#fdfdfd;padding:10px;border-radius:6px;border:1px solid #e2e8f0;">
+            <div style="font-weight:700;color:#1e293b;border-bottom:1px solid #f1f5f9;padding-bottom:4px;">
+              ⚙️ Поставки за патеката:
+            </div>
+
+            <!-- РЕЖИМ -->
+            <div class="form-row">
+              <div class="form-col">
+                <label style="font-weight:600;">Режим на дозирање:</label>
+                <div style="display:flex;flex-direction:column;gap:5px;margin-top:2px;">
+                  <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:700;color:#1e3a8a;background:#eff6ff;padding:4px 6px;border-radius:4px;border:1px solid #bfdbfe;">
+                    <input type="radio" name="svgGenMode" value="pockets" checked>
+                    <span>🎯 Тежишта на полиња и канали (Полнење)</span>
+                  </label>
+                  <span style="font-size:10px;color:#166534;font-weight:600;margin-left:22px;margin-bottom:2px;">
+                    ⭐ Наоѓа најдлабоки точки во езерца и оски на канали подалеку од ѕидовите
+                  </span>
+
+                  <div style="display:flex;gap:12px;margin-left:22px;">
+                    <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:11px;color:#475569;">
+                      <input type="radio" name="svgGenMode" value="lines">
+                      <span>Линии / Контури</span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:11px;color:#475569;">
+                      <input type="radio" name="svgGenMode" value="dots">
+                      <span>Капки по контури</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ДИМЕНЗИИ И ЧЕКОР -->
+            <div class="form-row mt-2">
+              <div class="form-col">
+                <label>Ширина на шемата (mm):</label>
+                <input type="number" id="svgGenTargetWidth" class="inp" value="60" step="0.1" title="Сакана физичка ширина. Автоматски се чита точната ширина од SVG.">
+              </div>
+              <div class="form-col">
+                <label>Чекор меѓу капки (mm):</label>
+                <select id="svgGenStep" class="inp">
+                  <option value="1.5">1.5 mm (Густи капки)</option>
+                  <option value="2.0" selected>2.0 mm (Оптимално за канали ~1mm)</option>
+                  <option value="2.5">2.5 mm (Поретки капки)</option>
+                  <option value="3.0">3.0 mm (Широк чекор)</option>
+                  <option value="1.0">1.0 mm (Многу густо)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- БРЗИНИ И ВРЕМЕ ЗА КАПКА -->
+            <div class="form-row mt-2">
+              <div class="form-col">
+                <label>Брзина на линија F:</label>
+                <input type="number" id="svgGenSpeed" class="inp" value="650" title="Брзина на движење при нанесување на линија (mm/min, стандардно 600-650)">
+              </div>
+              <div class="form-col">
+                <label>Брзина меѓу езерца F:</label>
+                <input type="number" id="svgGenTravelNearSpeed" class="inp" value="1200" title="Брзина кога диспензерите се горе при премин меѓу блиски езерца (mm/min, стандардно 1200-2000)">
+              </div>
+              <div class="form-col">
+                <label>Брзина долг премин / алат F:</label>
+                <input type="number" id="svgGenTravelFarSpeed" class="inp" value="5000" title="Брзина при далечно движење или промена на диспензер (mm/min, стандардно 5000)">
+              </div>
+            </div>
+
+            <div class="form-row mt-2">
+              <div class="form-col">
+                <label>Време капка / пауза (ms):</label>
+                <input type="number" id="svgGenDropTime" class="inp" value="50" title="Време за задршка на секоја единечна капка или капиларна точка (ms, стандардно 50-100)">
+              </div>
+              <div class="form-col">
+                <label>Мин. од ѕид (mm):</label>
+                <input type="number" id="svgGenMinClearance" class="inp" value="0.18" step="0.02" title="Безбедно растојание од ѕидовите на езерцата (за тенки канали ~0.5-1mm ставете 0.15 - 0.20mm)">
+              </div>
+              <div class="form-col">
+                <label>Оддалеченост од врв (mm):</label>
+                <input type="number" id="svgGenTipMargin" class="inp" value="0.8" step="0.1" title="Спречува ставање капки на самите крајни врвови/ќошиња на каналите и ги центрира кон средината за рамномерно разливање во два правци">
+              </div>
+            </div>
+
+            <!-- ВОЛУМЕТРИСКО И КАПИЛАРНО ДОЗИРАЊЕ -->
+            <div class="form-row mt-2">
+              <div class="form-col">
+                <label>Длабочина на езерца (mm):</label>
+                <input type="number" id="svgGenDepth" class="inp" value="1.0" step="0.1" title="Длабочина на калапот/гравурата во mm (стандардно 1.0mm)">
+              </div>
+              <div class="form-col">
+                <label>Дебит / Проток Q (mm³/s):</label>
+                <input type="number" id="svgGenFlowRate" class="inp" value="16.5" step="0.5" title="Калибриран проток на боја (mm³/s). 16.5 mm³/s одговара на F600 за прстен со 1.65mm ширина">
+              </div>
+              <div class="form-col" style="display:flex;align-items:flex-end;">
+                <label style="display:flex;align-items:center;gap:5px;font-size:10.5px;color:#1e293b;padding-bottom:6px;cursor:pointer;" title="Ако е вклучено, на тесните канали не влегува со игла, туку на влезот става точка за напојување со автоматско време">
+                  <input type="checkbox" id="svgGenCapillary" checked>
+                  <strong>Капиларност за тесни канали</strong>
+                </label>
+              </div>
+            </div>
+
+            <!-- АКУТНИ АГЛИ И ПОЛИГОНАЛНА RDP РЕДУКЦИЈА (V1.8.4) -->
+            <div class="form-row mt-2">
+              <div class="form-col">
+                <label>Акутен шпиц задршка (ms):</label>
+                <input type="number" id="svgGenAcuteTipDwell" class="inp" value="30" title="Автоматска задршка со отворен вентил на остри шпицови/краци (<60°) за бојата да го исполни врвот пред дизната да сврти (стандардно 30ms, како на ѕвезди)">
+              </div>
+              <div class="form-col" style="display:flex;align-items:flex-end;">
+                <label style="display:flex;align-items:center;gap:5px;font-size:10.5px;color:#1e293b;padding-bottom:6px;cursor:pointer;" title="Ramer-Douglas-Peucker алгоритам: ги препознава правите полигонални краци и ги сведува на само 2 клучни точки (почеток и врв) со отклон < 0.08mm наместо десетици густи точки">
+                  <input type="checkbox" id="svgGenRdpSimplify" checked>
+                  <strong>Полигонална RDP редукција</strong>
+                </label>
+              </div>
+            </div>
+
+            <!-- ПОЧЕТЕН ОФСЕТ -->
+            <div class="form-row mt-2">
+              <div class="form-col">
+                <label>Почетен офсет X (mm):</label>
+                <input type="number" id="svgGenOffsetX" class="inp" value="0" step="0.5">
+              </div>
+              <div class="form-col">
+                <label>Почетен офсет Y (mm):</label>
+                <input type="number" id="svgGenOffsetY" class="inp" value="0" step="0.5">
+              </div>
+            </div>
+
+            <!-- CNC ОПЦИИ -->
+            <div style="display:flex;flex-direction:column;gap:4px;margin-top:4px;padding:6px;background:#f8fafc;border-radius:4px;border:1px solid #e2e8f0;">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;">
+                <input type="checkbox" id="svgGenInvertY" checked>
+                <strong>Инвертирај Y оска (CNC стандард: горе е позитивно)</strong>
+              </label>
+
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;margin-top:2px;">
+                <input type="checkbox" id="svgGenGroupByColor" checked>
+                <strong>Групирај по диспензер (Боја)</strong>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:10px 14px;">
+        <button id="btnCancelSvgGen" class="btn btn-sm">✖ Откажи</button>
+        <div style="display:flex;gap:8px;">
+          <button id="btnSvgGenAppend" class="btn btn-sm btn-outline" style="border-color:#7c3aed;color:#6d28d9;font-weight:600;">➕ Додади на крај на табелата</button>
+          <button id="btnSvgGenReplace" class="btn btn-sm btn-primary" style="background:#7c3aed;border-color:#6d28d9;font-weight:700;">🚀 Генерирај патека (Замени табела)</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3-ОПЦИСКИ ДИЈАЛОГ ЗА НЕЗАЧУВАНИ ИЗМЕНИ -->
+  <div id="unsavedModal" class="modal-overlay" style="display:none;z-index:1100;">
+    <div class="modal-dialog unsaved-dialog">
+      <div class="modal-header unsaved-header">
+        <div class="unsaved-header-title">
+          <span class="unsaved-icon">⚠️</span>
+          <h3 id="unsavedModalTitle" style="margin:0;font-size:14px;color:#92400e;">Незачувани измени</h3>
+        </div>
+        <button id="btnCloseUnsavedModal" class="btn btn-xs btn-danger" type="button">✖</button>
+      </div>
+      <div class="modal-body unsaved-body">
+        <p id="unsavedModalMessage" class="unsaved-message"></p>
+      </div>
+      <div class="modal-footer unsaved-footer">
+        <button id="btnUnsavedDiscard" class="btn btn-sm btn-unsaved-discard" type="button">🗑️ Не снимај</button>
+        <div class="unsaved-actions-right">
+          <button id="btnUnsavedCancel" class="btn btn-sm" type="button">✖ Откажи</button>
+          <button id="btnUnsavedSave" class="btn btn-sm btn-primary" type="button">💾 Сними и продолжи</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/state.js"></script>
+  <script src="js/tabs.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/parser.js"></script>
+  <script src="js/driver-simulator.js"></script>
+  <script src="js/driver-mach3.js"></script>
+  <script src="js/machine-driver.js"></script>
+  <script src="js/canvas.js"></script>
+  <script src="js/table.js"></script>
+  <script src="js/gcode.js"></script>
+  <script src="js/svg-generator.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
